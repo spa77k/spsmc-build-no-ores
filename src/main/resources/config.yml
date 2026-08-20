@@ -1,2 +1,3 @@
 migration:
   existing-build-scan-completed: false
+  existing-build-chunks-file: existing-build-chunks.txt

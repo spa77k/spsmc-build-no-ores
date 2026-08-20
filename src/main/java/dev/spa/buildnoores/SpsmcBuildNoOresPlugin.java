@@ -19,8 +19,13 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.BufferedWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -37,6 +42,7 @@ import java.util.stream.Stream;
 public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener, CommandExecutor {
     private static final String TARGET_WORLD = "build";
     private static final String SCAN_COMPLETED_PATH = "migration.existing-build-scan-completed";
+    private static final String EXISTING_CHUNKS_FILE = "existing-build-chunks.txt";
     private static final int REGION_HEADER_BYTES = 8192;
     private static final int REGION_CHUNK_COUNT = 32;
     private static final int CHUNKS_PER_TICK = 1;
@@ -156,8 +162,18 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return true;
         }
 
+        Path coordinateFile;
+        try {
+            coordinateFile = writeExistingChunkSnapshot(buildWorld, chunks);
+        } catch (IOException exception) {
+            getLogger().log(java.util.logging.Level.SEVERE, "既存buildワールドのチャンク座標を保存できませんでした。", exception);
+            sender.sendMessage("既存buildワールドのチャンク座標を保存できませんでした。スキャンを開始しません。");
+            return true;
+        }
+
         existingOreScanJob = new ExistingOreScanJob(buildWorld, chunks, sender);
-        sender.sendMessage("既存生成チャンク: " + chunks.size() + "件。" + ChunkBounds.describe(chunks));
+        sender.sendMessage("既存生成チャンク: " + chunks.size() + "件。座標を保存しました: " + coordinateFile);
+        sender.sendMessage(ChunkBounds.describe(chunks));
         existingOreScanJob.start();
         sender.sendMessage("既存buildワールドの鉱石スキャンを開始しました。完了までサーバーを停止しないでください。");
         return true;
@@ -182,6 +198,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             getConfig().set(boundsPath + ".min-block-z", bounds.minBlockZ());
             getConfig().set(boundsPath + ".max-block-z", bounds.maxBlockZ());
         }
+        getConfig().set("migration.existing-build-chunks-file", EXISTING_CHUNKS_FILE);
         getConfig().set(SCAN_COMPLETED_PATH, true);
         saveConfig();
         existingOreScanJob = null;
@@ -225,6 +242,49 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return null;
         }
         return material.name().startsWith("DEEPSLATE_") ? Material.DEEPSLATE : Material.STONE;
+    }
+
+    private Path writeExistingChunkSnapshot(World world, List<ChunkCoordinate> chunks) throws IOException {
+        Files.createDirectories(getDataFolder().toPath());
+
+        List<ChunkCoordinate> sortedChunks = new ArrayList<>(chunks);
+        sortedChunks.sort(Comparator
+                .comparingInt(ChunkCoordinate::x)
+                .thenComparingInt(ChunkCoordinate::z));
+
+        Path snapshot = getDataFolder().toPath().resolve(EXISTING_CHUNKS_FILE);
+        Path temporary = snapshot.resolveSibling(EXISTING_CHUNKS_FILE + ".tmp");
+        try (BufferedWriter writer = Files.newBufferedWriter(
+                temporary,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE
+        )) {
+            writer.write("# SPSMC Build No Ores existing generated chunk snapshot");
+            writer.newLine();
+            writer.write("# world=" + world.getName());
+            writer.newLine();
+            writer.write("# format=chunk_x,chunk_z");
+            writer.newLine();
+            for (ChunkCoordinate chunk : sortedChunks) {
+                writer.write(Integer.toString(chunk.x()));
+                writer.write(',');
+                writer.write(Integer.toString(chunk.z()));
+                writer.newLine();
+            }
+        }
+
+        try {
+            return Files.move(
+                    temporary,
+                    snapshot,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING
+            );
+        } catch (AtomicMoveNotSupportedException exception) {
+            return Files.move(temporary, snapshot, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private record ChunkCoordinate(int x, int z) {
