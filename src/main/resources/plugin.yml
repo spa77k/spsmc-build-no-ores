@@ -1,5 +1,5 @@
 name: SPSMCBuildNoOres
-version: 0.1.0
+version: 0.2.0
 main: dev.spa.buildnoores.SpsmcBuildNoOresPlugin
 api-version: "1.21"
 description: Removes naturally generated ores from the build world while keeping normal terrain generation.

@@ -46,6 +46,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
     private static final int REGION_HEADER_BYTES = 8192;
     private static final int REGION_CHUNK_COUNT = 32;
     private static final int CHUNKS_PER_TICK = 1;
+    private static final long AUTOMATIC_SCAN_DELAY_TICKS = 20L;
     private static final Pattern REGION_FILE_PATTERN = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
 
     private static final Set<Material> ORE_MATERIALS = Set.of(
@@ -68,6 +69,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
     );
 
     private ExistingOreScanJob existingOreScanJob;
+    private BukkitTask automaticScanTask;
 
     @Override
     public void onEnable() {
@@ -84,11 +86,16 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         // build がプラグイン有効化より先に読み込まれていた場合にも登録します。
         for (World world : Bukkit.getWorlds()) {
             registerPopulator(world);
+            scheduleAutomaticScan(world);
         }
     }
 
     @Override
     public void onDisable() {
+        if (automaticScanTask != null) {
+            automaticScanTask.cancel();
+            automaticScanTask = null;
+        }
         if (existingOreScanJob != null) {
             existingOreScanJob.cancel();
             existingOreScanJob = null;
@@ -99,6 +106,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
     public void onWorldInit(WorldInitEvent event) {
         // Multiverse-Core が後から build を作成する場合はこちらで登録します。
         registerPopulator(event.getWorld());
+        scheduleAutomaticScan(event.getWorld());
     }
 
     private void registerPopulator(World world) {
@@ -114,6 +122,32 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         // WorldInitEvent 中に追加し、以後の新規チャンク生成へ適用します。
         populators.add(new OreRemovalPopulator());
         getLogger().info("buildワールドの新規チャンクから自然生成鉱石を除去します。");
+    }
+
+    private void scheduleAutomaticScan(World world) {
+        if (!TARGET_WORLD.equals(world.getName())
+                || world.getEnvironment() != World.Environment.NORMAL
+                || getConfig().getBoolean(SCAN_COMPLETED_PATH, false)
+                || existingOreScanJob != null
+                || automaticScanTask != null) {
+            return;
+        }
+
+        automaticScanTask = getServer().getScheduler().runTaskLater(
+                this,
+                () -> {
+                    automaticScanTask = null;
+                    World buildWorld = Bukkit.getWorld(TARGET_WORLD);
+                    if (buildWorld == null
+                            || getConfig().getBoolean(SCAN_COMPLETED_PATH, false)
+                            || existingOreScanJob != null) {
+                        return;
+                    }
+                    getLogger().info("buildワールドの既存生成チャンクを自動スキャンします。");
+                    beginExistingOreScan(buildWorld, Bukkit.getConsoleSender());
+                },
+                AUTOMATIC_SCAN_DELAY_TICKS
+        );
     }
 
     @Override
@@ -153,13 +187,28 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return true;
         }
 
+        beginExistingOreScan(buildWorld, sender);
+        return true;
+    }
+
+    private boolean beginExistingOreScan(World buildWorld, CommandSender sender) {
+        if (existingOreScanJob != null) {
+            sender.sendMessage("既存buildワールドの鉱石スキャンはすでに実行中です。");
+            return false;
+        }
+
+        if (!TARGET_WORLD.equals(buildWorld.getName()) || buildWorld.getEnvironment() != World.Environment.NORMAL) {
+            sender.sendMessage("buildワールドが通常環境ではないため、スキャンを中止しました。");
+            return false;
+        }
+
         List<ChunkCoordinate> chunks;
         try {
             chunks = ExistingChunkIndex.read(buildWorld);
         } catch (IOException exception) {
             getLogger().log(java.util.logging.Level.SEVERE, "buildワールドの既存チャンク一覧を読み取れませんでした。", exception);
             sender.sendMessage("buildワールドのチャンク一覧を読み取れませんでした。ログを確認してください。");
-            return true;
+            return false;
         }
 
         Path coordinateFile;
@@ -168,7 +217,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         } catch (IOException exception) {
             getLogger().log(java.util.logging.Level.SEVERE, "既存buildワールドのチャンク座標を保存できませんでした。", exception);
             sender.sendMessage("既存buildワールドのチャンク座標を保存できませんでした。スキャンを開始しません。");
-            return true;
+            return false;
         }
 
         existingOreScanJob = new ExistingOreScanJob(buildWorld, chunks, sender);

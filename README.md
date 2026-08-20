@@ -11,7 +11,7 @@ Paper の `build` ワールドだけを対象に、自然生成された鉱石�
 - 自然生成された鉱石ブロックを次のように置き換えます。
   - 通常の鉱石 → `stone`
   - 深層岩の鉱石 → `deepslate`
-- `/buildnores scan`で、既存の生成済みチャンクを一度だけスキャンできます。
+- `build`ワールド読み込み後、既存の生成済みチャンクを自動で一度だけスキャンします。
 - スキャン完了フラグを設定ファイルへ保存し、完了後の再実行を拒否します。
 - スキャン開始時に、既存の生成済みチャンク座標を`existing-build-chunks.txt`へ保存します。
 - スキャン開始・完了時には、保存対象のチャンク数と外接範囲も表示します。
@@ -30,19 +30,19 @@ mvn clean package
 生成物:
 
 ```text
-target/spsmc-build-no-ores-0.1.0.jar
+target/spsmc-build-no-ores-0.2.0.jar
 ```
 
 ## 導入
 
 生成したJARをPaperサーバーの `plugins/` に配置して再起動します。
 
-既存の`build`ワールドを一度だけ掃除する場合:
+自動スキャンに失敗した場合の手動再試行:
 
 ```text
 /buildnores scan
 ```
 
-このコマンドは`build`ワールドの既存リージョンにある生成済みチャンクを、1チャンクずつ処理します。開始時に`plugins/SPSMCBuildNoOres/existing-build-chunks.txt`へ正確なチャンク座標を保存し、完了すると`plugins/SPSMCBuildNoOres/config.yml`の`migration.existing-build-scan-completed`が`true`になります。座標の外接範囲は補助情報として同じ設定ファイルへ保存します。
+通常は`build`ワールドの読み込み後に自動実行されます。このコマンドは自動スキャンが失敗した場合の再試行用です。完了すると`plugins/SPSMCBuildNoOres/config.yml`の`migration.existing-build-scan-completed`が`true`になります。以後の新規チャンクは生成時に継続して鉱石を置換します。
 
 このリポジトリの正本へ組み込む場合は、JARの配置方法と `plugin-urls.txt` またはDockerのビルド方法を別途決めてから反映します。
