@@ -7,3 +7,13 @@ author: spa
 load: STARTUP
 softdepend:
   - Multiverse-Core
+commands:
+  buildnores:
+    description: Scan existing generated build chunks and remove ore blocks once.
+    usage: /buildnores scan
+    permission: spsmcbuildnores.scan
+    permission-message: このコマンドを実行する権限がありません。
+permissions:
+  spsmcbuildnores.scan:
+    description: Run the one-time existing build world ore scan.
+    default: op
