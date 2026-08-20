@@ -157,6 +157,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         }
 
         existingOreScanJob = new ExistingOreScanJob(buildWorld, chunks, sender);
+        sender.sendMessage("既存生成チャンク: " + chunks.size() + "件。" + ChunkBounds.describe(chunks));
         existingOreScanJob.start();
         sender.sendMessage("既存buildワールドの鉱石スキャンを開始しました。完了までサーバーを停止しないでください。");
         return true;
@@ -167,12 +168,27 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return;
         }
 
+        ChunkBounds bounds = job.bounds();
+        String boundsPath = "migration.existing-build-scan-bounds";
+        if (bounds == null) {
+            getConfig().set(boundsPath, null);
+        } else {
+            getConfig().set(boundsPath + ".min-chunk-x", bounds.minChunkX());
+            getConfig().set(boundsPath + ".max-chunk-x", bounds.maxChunkX());
+            getConfig().set(boundsPath + ".min-chunk-z", bounds.minChunkZ());
+            getConfig().set(boundsPath + ".max-chunk-z", bounds.maxChunkZ());
+            getConfig().set(boundsPath + ".min-block-x", bounds.minBlockX());
+            getConfig().set(boundsPath + ".max-block-x", bounds.maxBlockX());
+            getConfig().set(boundsPath + ".min-block-z", bounds.minBlockZ());
+            getConfig().set(boundsPath + ".max-block-z", bounds.maxBlockZ());
+        }
         getConfig().set(SCAN_COMPLETED_PATH, true);
         saveConfig();
         existingOreScanJob = null;
         job.sendMessage("既存buildワールドの鉱石スキャンが完了しました。対象チャンク: "
                 + job.totalChunks() + ", スキャン済み: " + job.scannedChunks()
-                + ", 置換ブロック: " + job.replacedBlocks() + "。この処理は再実行されません。");
+                + ", 置換ブロック: " + job.replacedBlocks() + "。"
+                + ChunkBounds.describe(bounds) + "この処理は再実行されません。");
     }
 
     private void failExistingOreScan(ExistingOreScanJob job, Exception exception) {
@@ -212,6 +228,57 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
     }
 
     private record ChunkCoordinate(int x, int z) {
+    }
+
+    private record ChunkBounds(int minChunkX, int maxChunkX, int minChunkZ, int maxChunkZ) {
+        private static ChunkBounds from(List<ChunkCoordinate> chunks) {
+            if (chunks.isEmpty()) {
+                return null;
+            }
+
+            int minChunkX = Integer.MAX_VALUE;
+            int maxChunkX = Integer.MIN_VALUE;
+            int minChunkZ = Integer.MAX_VALUE;
+            int maxChunkZ = Integer.MIN_VALUE;
+
+            for (ChunkCoordinate chunk : chunks) {
+                minChunkX = Math.min(minChunkX, chunk.x());
+                maxChunkX = Math.max(maxChunkX, chunk.x());
+                minChunkZ = Math.min(minChunkZ, chunk.z());
+                maxChunkZ = Math.max(maxChunkZ, chunk.z());
+            }
+            return new ChunkBounds(minChunkX, maxChunkX, minChunkZ, maxChunkZ);
+        }
+
+        private int minBlockX() {
+            return minChunkX * 16;
+        }
+
+        private int maxBlockX() {
+            return maxChunkX * 16 + 15;
+        }
+
+        private int minBlockZ() {
+            return minChunkZ * 16;
+        }
+
+        private int maxBlockZ() {
+            return maxChunkZ * 16 + 15;
+        }
+
+        private static String describe(List<ChunkCoordinate> chunks) {
+            return describe(from(chunks));
+        }
+
+        private static String describe(ChunkBounds bounds) {
+            if (bounds == null) {
+                return "生成済みチャンクはありません。";
+            }
+            return "チャンク範囲 X=" + bounds.minChunkX + ".." + bounds.maxChunkX
+                    + ", Z=" + bounds.minChunkZ + ".." + bounds.maxChunkZ
+                    + "（ブロック座標 X=" + bounds.minBlockX() + ".." + bounds.maxBlockX()
+                    + ", Z=" + bounds.minBlockZ() + ".." + bounds.maxBlockZ() + "）。";
+        }
     }
 
     private static final class ExistingChunkIndex {
@@ -286,6 +353,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
     private final class ExistingOreScanJob {
         private final World world;
         private final List<ChunkCoordinate> chunks;
+        private final ChunkBounds bounds;
         private final CommandSender sender;
         private final Iterator<ChunkCoordinate> iterator;
         private BukkitTask task;
@@ -295,6 +363,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         private ExistingOreScanJob(World world, List<ChunkCoordinate> chunks, CommandSender sender) {
             this.world = Objects.requireNonNull(world);
             this.chunks = List.copyOf(chunks);
+            this.bounds = ChunkBounds.from(this.chunks);
             this.sender = Objects.requireNonNull(sender);
             this.iterator = this.chunks.iterator();
         }
@@ -354,6 +423,10 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
 
         private int replacedBlocks() {
             return replacedBlocks;
+        }
+
+        private ChunkBounds bounds() {
+            return bounds;
         }
 
         private void sendMessage(String message) {
