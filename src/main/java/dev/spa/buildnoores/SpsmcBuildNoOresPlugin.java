@@ -159,10 +159,13 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return false;
         }
 
-        if (args.length != 1 || !args[0].equalsIgnoreCase("scan")) {
-            sender.sendMessage("使い方: /buildnores scan");
+        if (args.length != 1
+                || (!args[0].equalsIgnoreCase("scan") && !args[0].equalsIgnoreCase("rescan"))) {
+            sender.sendMessage("使い方: /buildnores scan または /buildnores rescan");
             return true;
         }
+
+        boolean rescan = args[0].equalsIgnoreCase("rescan");
 
         if (!sender.hasPermission("spsmcbuildnores.scan")) {
             sender.sendMessage("このコマンドを実行する権限がありません。");
@@ -174,7 +177,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return true;
         }
 
-        if (getConfig().getBoolean(SCAN_COMPLETED_PATH, false)) {
+        if (!rescan && getConfig().getBoolean(SCAN_COMPLETED_PATH, false)) {
             sender.sendMessage("既存buildワールドの鉱石スキャンは完了済みです。再実行しません。");
             return true;
         }

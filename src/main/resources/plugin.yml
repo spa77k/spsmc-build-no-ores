@@ -10,7 +10,7 @@ softdepend:
 commands:
   buildnores:
     description: Scan existing generated build chunks and remove ore blocks once.
-    usage: /buildnores scan
+    usage: /buildnores scan|rescan
     permission: spsmcbuildnores.scan
     permission-message: このコマンドを実行する権限がありません。
 permissions:

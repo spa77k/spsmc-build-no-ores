@@ -43,6 +43,12 @@ target/spsmc-build-no-ores-0.2.0.jar
 /buildnores scan
 ```
 
-通常は`build`ワールドの読み込み後に自動実行されます。このコマンドは自動スキャンが失敗または未完了になった場合の再試行用です。完了すると`plugins/SPSMCBuildNoOres/config.yml`の`migration.existing-build-scan-completed`が`true`になります。以後の新規チャンクは生成時に継続して鉱石を置換します。
+完了フラグがすでに`true`でも、明示的に既存チャンクを再処理する場合は次を使います。既存スキャンはプレイヤーが設置した鉱石も置換対象になるため、実行前に確認してください。
+
+```text
+/buildnores rescan
+```
+
+通常は`build`ワールドの読み込み後に自動実行されます。完了すると`plugins/SPSMCBuildNoOres/config.yml`の`migration.existing-build-scan-completed`が`true`になります。以後の新規チャンクは生成時に継続して鉱石を置換します。
 
 このリポジトリの正本へ組み込む場合は、JARの配置方法と `plugin-urls.txt` またはDockerのビルド方法を別途決めてから反映します。
