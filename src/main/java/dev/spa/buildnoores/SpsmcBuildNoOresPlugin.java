@@ -222,13 +222,10 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return false;
         }
 
-        List<ChunkCoordinate> chunks = indexedChunks.stream()
+        List<ChunkCoordinate> chunks = indexedChunks;
+        long generatedChunks = chunks.stream()
                 .filter(coordinate -> buildWorld.isChunkGenerated(coordinate.x(), coordinate.z()))
-                .toList();
-        if (chunks.isEmpty() && !indexedChunks.isEmpty()) {
-            sender.sendMessage("リージョンにはチャンクがありますが、生成完了済みチャンクを確認できないためスキャンを開始しません。後で再実行してください。");
-            return false;
-        }
+                .count();
 
         Path coordinateFile;
         try {
@@ -240,8 +237,8 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         }
 
         existingOreScanJob = new ExistingOreScanJob(buildWorld, chunks, sender);
-        sender.sendMessage("既存生成チャンク: " + chunks.size() + "件（リージョン記録: " + indexedChunks.size()
-                + "件）。座標を保存しました: " + coordinateFile);
+        sender.sendMessage("既存リージョンチャンク: " + chunks.size() + "件（生成完了: " + generatedChunks
+                + "件、生成途中: " + (chunks.size() - generatedChunks) + "件）。座標を保存しました: " + coordinateFile);
         sender.sendMessage(ChunkBounds.describe(chunks));
         existingOreScanJob.start();
         sender.sendMessage("既存buildワールドの鉱石スキャンを開始しました。完了までサーバーを停止しないでください。");
@@ -541,12 +538,12 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
                     ChunkCoordinate coordinate = pendingChunks.removeFirst();
                     int attempts = loadAttempts.merge(coordinate, 1, Integer::sum);
                     boolean wasLoaded = world.isChunkLoaded(coordinate.x(), coordinate.z());
-                    boolean loaded = wasLoaded || world.loadChunk(coordinate.x(), coordinate.z(), false);
-                    if (!loaded) {
+                    boolean loaded = world.loadChunk(coordinate.x(), coordinate.z(), true);
+                    if (!loaded || !world.isChunkGenerated(coordinate.x(), coordinate.z())) {
                         if (attempts >= MAX_CHUNK_LOAD_ATTEMPTS) {
                             task.cancel();
                             failExistingOreScan(this, new IllegalStateException(
-                                    "チャンクを生成せずに読み込めませんでした: " + coordinate
+                                    "既存チャンクを生成完了状態まで読み込めませんでした: " + coordinate
                                             + "（試行" + attempts + "回）"));
                             return;
                         }
