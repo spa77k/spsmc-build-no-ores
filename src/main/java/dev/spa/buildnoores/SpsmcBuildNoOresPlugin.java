@@ -193,6 +193,11 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return true;
         }
 
+        if (rescan) {
+            getConfig().set(SCAN_COMPLETED_PATH, false);
+            saveConfig();
+        }
+
         beginExistingOreScan(buildWorld, sender);
         return true;
     }
@@ -208,12 +213,20 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return false;
         }
 
-        List<ChunkCoordinate> chunks;
+        List<ChunkCoordinate> indexedChunks;
         try {
-            chunks = ExistingChunkIndex.read(buildWorld);
+            indexedChunks = ExistingChunkIndex.read(buildWorld);
         } catch (IOException exception) {
             getLogger().log(java.util.logging.Level.SEVERE, "buildワールドの既存チャンク一覧を読み取れませんでした。", exception);
             sender.sendMessage("buildワールドのチャンク一覧を読み取れませんでした。ログを確認してください。");
+            return false;
+        }
+
+        List<ChunkCoordinate> chunks = indexedChunks.stream()
+                .filter(coordinate -> buildWorld.isChunkGenerated(coordinate.x(), coordinate.z()))
+                .toList();
+        if (chunks.isEmpty() && !indexedChunks.isEmpty()) {
+            sender.sendMessage("リージョンにはチャンクがありますが、生成完了済みチャンクを確認できないためスキャンを開始しません。後で再実行してください。");
             return false;
         }
 
@@ -227,7 +240,8 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         }
 
         existingOreScanJob = new ExistingOreScanJob(buildWorld, chunks, sender);
-        sender.sendMessage("既存生成チャンク: " + chunks.size() + "件。座標を保存しました: " + coordinateFile);
+        sender.sendMessage("既存生成チャンク: " + chunks.size() + "件（リージョン記録: " + indexedChunks.size()
+                + "件）。座標を保存しました: " + coordinateFile);
         sender.sendMessage(ChunkBounds.describe(chunks));
         existingOreScanJob.start();
         sender.sendMessage("既存buildワールドの鉱石スキャンを開始しました。完了までサーバーを停止しないでください。");
@@ -240,6 +254,8 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         }
 
         if (job.scannedChunks() != job.totalChunks()) {
+            getConfig().set(SCAN_COMPLETED_PATH, false);
+            saveConfig();
             existingOreScanJob = null;
             getLogger().severe("既存buildワールドの鉱石スキャンが未完了のまま終了しました。完了扱いにはしません。"
                     + "対象チャンク: " + job.totalChunks() + ", スキャン済み: " + job.scannedChunks());
@@ -276,6 +292,8 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             return;
         }
 
+        getConfig().set(SCAN_COMPLETED_PATH, false);
+        saveConfig();
         existingOreScanJob = null;
         getLogger().log(java.util.logging.Level.SEVERE, "既存buildワールドの鉱石スキャンに失敗しました。完了扱いにはしません。", exception);
         job.sendMessage("既存buildワールドの鉱石スキャンに失敗しました。完了扱いではないため、原因確認後に再実行できます。");
@@ -298,6 +316,22 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             }
         }
         return replaced;
+    }
+
+    private static int countOresInChunk(Chunk chunk) {
+        int remaining = 0;
+        World world = chunk.getWorld();
+
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                for (int y = world.getMinHeight(); y < world.getMaxHeight(); y++) {
+                    if (ORE_MATERIALS.contains(chunk.getBlock(x, y, z).getType())) {
+                        remaining++;
+                    }
+                }
+            }
+        }
+        return remaining;
     }
 
     private static Material replacementFor(Material material) {
@@ -521,7 +555,17 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
                     }
 
                     Chunk chunk = world.getChunkAt(coordinate.x(), coordinate.z(), false);
-                    replacedBlocks += replaceOresInChunk(chunk);
+                    int replacedInChunk = replaceOresInChunk(chunk);
+                    int remainingOres = countOresInChunk(chunk);
+                    if (remainingOres != 0) {
+                        task.cancel();
+                        failExistingOreScan(this, new IllegalStateException(
+                                "鉱石置換後も鉱石が残っています: " + coordinate
+                                        + "（残存" + remainingOres + "ブロック）"));
+                        return;
+                    }
+
+                    replacedBlocks += replacedInChunk;
                     scannedChunks++;
                     loadAttempts.remove(coordinate);
 
