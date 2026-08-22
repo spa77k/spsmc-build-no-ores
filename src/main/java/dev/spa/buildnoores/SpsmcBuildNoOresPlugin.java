@@ -27,9 +27,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Comparator;
-import java.util.Iterator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,7 +48,8 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
     private static final int REGION_HEADER_BYTES = 8192;
     private static final int REGION_CHUNK_COUNT = 32;
     private static final int CHUNKS_PER_TICK = 1;
-    private static final long AUTOMATIC_SCAN_DELAY_TICKS = 20L;
+    private static final int MAX_CHUNK_LOAD_ATTEMPTS = 5;
+    private static final long AUTOMATIC_SCAN_DELAY_TICKS = 100L;
     private static final Pattern REGION_FILE_PATTERN = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
 
     private static final Set<Material> ORE_MATERIALS = Set.of(
@@ -230,6 +233,14 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
 
     private void finishExistingOreScan(ExistingOreScanJob job) {
         if (existingOreScanJob != job) {
+            return;
+        }
+
+        if (job.scannedChunks() != job.totalChunks()) {
+            existingOreScanJob = null;
+            getLogger().severe("既存buildワールドの鉱石スキャンが未完了のまま終了しました。完了扱いにはしません。"
+                    + "対象チャンク: " + job.totalChunks() + ", スキャン済み: " + job.scannedChunks());
+            job.sendMessage("既存buildワールドの鉱石スキャンは未完了です。完了フラグは設定せず、再実行できます。");
             return;
         }
 
@@ -464,7 +475,8 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
         private final List<ChunkCoordinate> chunks;
         private final ChunkBounds bounds;
         private final CommandSender sender;
-        private final Iterator<ChunkCoordinate> iterator;
+        private final ArrayDeque<ChunkCoordinate> pendingChunks;
+        private final Map<ChunkCoordinate, Integer> loadAttempts = new HashMap<>();
         private BukkitTask task;
         private int scannedChunks;
         private int replacedBlocks;
@@ -474,7 +486,7 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
             this.chunks = List.copyOf(chunks);
             this.bounds = ChunkBounds.from(this.chunks);
             this.sender = Objects.requireNonNull(sender);
-            this.iterator = this.chunks.iterator();
+            this.pendingChunks = new ArrayDeque<>(this.chunks);
         }
 
         private void start() {
@@ -488,23 +500,34 @@ public final class SpsmcBuildNoOresPlugin extends JavaPlugin implements Listener
 
         private void tick() {
             try {
-                for (int i = 0; i < CHUNKS_PER_TICK && iterator.hasNext(); i++) {
-                    ChunkCoordinate coordinate = iterator.next();
+                for (int i = 0; i < CHUNKS_PER_TICK && !pendingChunks.isEmpty(); i++) {
+                    ChunkCoordinate coordinate = pendingChunks.removeFirst();
+                    int attempts = loadAttempts.merge(coordinate, 1, Integer::sum);
                     boolean wasLoaded = world.isChunkLoaded(coordinate.x(), coordinate.z());
-                    if (!world.isChunkGenerated(coordinate.x(), coordinate.z())) {
+                    boolean loaded = wasLoaded || world.loadChunk(coordinate.x(), coordinate.z(), false);
+                    if (!loaded) {
+                        if (attempts >= MAX_CHUNK_LOAD_ATTEMPTS) {
+                            task.cancel();
+                            failExistingOreScan(this, new IllegalStateException(
+                                    "チャンクを生成せずに読み込めませんでした: " + coordinate
+                                            + "（試行" + attempts + "回）"));
+                            return;
+                        }
+                        pendingChunks.addLast(coordinate);
                         continue;
                     }
 
                     Chunk chunk = world.getChunkAt(coordinate.x(), coordinate.z(), false);
                     replacedBlocks += replaceOresInChunk(chunk);
                     scannedChunks++;
+                    loadAttempts.remove(coordinate);
 
                     if (!wasLoaded) {
                         world.unloadChunk(coordinate.x(), coordinate.z(), true);
                     }
                 }
 
-                if (!iterator.hasNext()) {
+                if (pendingChunks.isEmpty()) {
                     task.cancel();
                     finishExistingOreScan(this);
                 } else if (scannedChunks > 0 && scannedChunks % 100 == 0) {
